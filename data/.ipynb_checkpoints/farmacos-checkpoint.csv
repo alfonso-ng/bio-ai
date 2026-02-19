@@ -1,0 +1,8 @@
+name,canonical_smiles,description
+Aspirina,CC(=O)Oc1ccccc1C(=O)O,Antiinflamatorio común (Control negativo)
+Ibuprofeno,CC(C)Cc1ccc(C(C)C(=O)O)cc1,Analgésico (Control negativo)
+Verubecestat,CN1C(N)=N[C@](C)(c2cc(NC(=O)c3ccc(F)cn3)ccc2F)CS1(=O)=O,Inhibidor real de BACE1 (Control positivo)
+Atabecestat,C[C@@]1(c2cc(NC(=O)c3ccc(C#N)cn3)ccc2F)C=CSC(N)=N1,Inhibidor de BACE1 en ensayos clínicos (Control positivo)
+Caffeine,Cn1c(=O)c2c(ncn2C)n(C)c1=O,Estimulante (Control negativo)
+Memantina,CC12CC3CC(C)(C1)CC(N)(C3)C2,Tratamiento Alzheimer (NMDA antagonist)
+Risperidona,Cc1nc2n(c(=O)c1CCN1CCC(c3noc4cc(F)ccc34)CC1)CCCC2,Antipsicótic
