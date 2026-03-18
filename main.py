@@ -1,6 +1,6 @@
 # main.py
 import config
-from src.data_loader import download_chembl_data
+from src.data_loader import download_chembl_data, load_data
 from src.features import featurize_smiles
 from src.model_tuning import run_optimization, evaluate_final_model
 from sklearn.model_selection import train_test_split
@@ -10,7 +10,7 @@ import joblib
 
 def run_pipeline():
     # 1. Obtener datos
-    df = download_chembl_data(config.TARGET_ID)
+    df = load_data(config.TARGET_ID)
     
     # 2. Vectorizar
     X = featurize_smiles(df, config.RADIUS, config.N_BITS)

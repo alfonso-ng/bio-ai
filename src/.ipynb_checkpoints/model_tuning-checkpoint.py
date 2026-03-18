@@ -12,7 +12,7 @@ import optuna.visualization as vis
 def run_optimization(X_train, y_train, trials):
     def objective(trial):
         # 1. Sugerir el modelo a probar
-        classifier_name = trial.suggest_categorical("classifier", ["XGBoost"])
+        classifier_name = trial.suggest_categorical("classifier", ["XGBoost", "RandomForest"])
         
         if classifier_name == "RandomForest":
             n_estimators = trial.suggest_int("rf_n_estimators", 100, 1000)

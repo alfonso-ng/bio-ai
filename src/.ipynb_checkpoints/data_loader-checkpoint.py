@@ -55,3 +55,9 @@ def convert_to_nm(row):
         return value * 1_000_000_000
     else:
         return None # Unidades raras que mejor descartar
+
+def load_data(target):
+
+    filepath = f"data/{target}_nonredundant.csv"
+    df = pd.read_csv(filepath)
+    return df
