@@ -1,49 +1,59 @@
+import deepchem as dc
 import joblib
 import pandas as pd
 import numpy as np
-from features import featurize_smiles # Reutilizamos vuestra "fábrica"
-import seaborn as sns
-import matplotlib.pyplot as plt
-
-def run_virtual_screening(model_path, candidates_csv):
-    # 1. Cargar el modelo guardado
-    model = joblib.load(model_path)
-    # 2. Cargar candidatos (ej: fármacos de la FDA)
-    # Supongamos que el CSV tiene columnas ['name', 'smiles']
-    df_candidates = pd.read_csv(candidates_csv)
-    print(df_candidates)
-    
-    print(f"🔬 Analizando {len(df_candidates)} moléculas...")
-    
-    # 3. Vectorización (IMPORTANTE: usar los mismos bits y radio)
-    X_candidates = featurize_smiles(df_candidates)
-    
-    # 4. Predicción de pChEMBL
-    # Vuestro modelo devuelve el logaritmo de la actividad
-    predictions = model.predict(X_candidates)
-    
-    # 5. Organizar resultados
-    df_candidates['predicted_pChEMBL'] = predictions
-    
-    # Ordenar de mayor a menor actividad
-    df_results = df_candidates.sort_values(by='predicted_pChEMBL', ascending=False)
-    
-    return df_results
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 
-def plot_screening_results(results):
-    plt.figure(figsize=(10, 6))
-    sns.histplot(results['predicted_pChEMBL'], kde=True, color='teal')
-    plt.axvline(x=7, color='red', linestyle='--', label='Umbral de Alta Potencia')
-    plt.title('Distribución de Predicciones en la Librería de Candidatos')
-    plt.xlabel('Valor pChEMBL Predicho')
-    plt.ylabel('Número de Moléculas')
-    plt.legend()
-    plt.show()
 
-# Ejecución rápida
-if __name__ == "__main__":
-    results = run_virtual_screening('models/best_CHEMBL4822_model.pkl', 'data/farmacos.csv')
-    print("✨ Top 5 candidatos encontrados:")
-    print(results.head(5))
-    plot_screening_results(results)
+# 1. CARGAR EL MODELO GANADOR
+print("Cargando modelo...")
+model = joblib.load("../models/mejor_modelo_lrrk2_scaffold.pkl")
+
+# 2. CARGAR DATASET ZINC15 (Versión actualizada)
+# Nota: 'subset' puede ser '10K', '100K', etc. Vamos a por el 100K para que sea serio.
+print("Cargando moléculas de ZINC15 via DeepChem...")
+tasks, datasets, transformers = dc.molnet.load_zinc15(featurizer='Raw')
+full_dataset = datasets[0] # Tomamos el primer bloque disponible
+
+# 3. FEATURIZER (Morgan Fingerprints)
+featurizer = dc.feat.CircularFingerprint(size=2048, radius=2)
+
+# 4. BUCLE DE SCREENING OPTIMIZADO
+print("Iniciando screening sobre 100,000 moléculas...")
+hits = []
+smiles_list = full_dataset.X
+
+
+for i, sml in enumerate(smiles_list):
+    mol = sml
+    if mol:
+        mw = Descriptors.MolWt(mol)
+        tpsa = Descriptors.TPSA(mol)
+        
+        # Filtros BBB estrictos
+        if mw < 450 and tpsa < 90:
+            # Featurización
+            fp = featurizer.featurize([mol])
+            
+            # Predicción
+            score = model.predict(fp)[0]
+            
+            if score > 7.0: # Umbral de potencia
+                hits.append({
+                    'SMILES': Chem.MolToSmiles(mol, canonical=True),
+                    'Score': round(float(score), 3),
+                    'MW': round(mw, 2),
+                    'TPSA': round(tpsa, 2)
+                })
+    
+    if i % 10000 == 0:
+        print(f"Progreso: {i} moléculas analizadas...")
+
+# 5. RESULTADOS
+df_hits = pd.DataFrame(hits).sort_values(by='Score', ascending=False)
+df_hits.to_csv("hits_lrrk2_zinc15.csv", index=False)
+
+print(f"\n¡Listo! Hemos encontrado {len(df_hits)} candidatos potenciales.")
+print(df_hits.head(10))
