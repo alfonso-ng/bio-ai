@@ -6,6 +6,8 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 import numpy as np
 import joblib
 
+
+
 def run_pipeline():
     def objective(trial):
         # Definimos el espacio de búsqueda
@@ -38,23 +40,34 @@ def run_pipeline():
     
     # 2. Featurización (Usando Morgan Fingerprints 2048)
     featurizer = dc.feat.CircularFingerprint(size=2048, radius=2)
-    loader = dc.data.CSVLoader(tasks=["pchembl_value"], feature_field="canonical_smiles", featurizer=featurizer)
-    dataset = loader.create_dataset("data/CHEMBL1075104_nonredundant.csv")
-    
-    # 3. Scaffold Splitting (80/10/10)
-    splitter = dc.splits.ScaffoldSplitter()
-    train_ds, valid_ds, test_ds = splitter.train_valid_test_split(dataset)
+
+    def transform_to_morgan(dc_dataset):
+        # Extraemos los SMILES que están guardados en el atributo .ids
+        smiles_list = dc_dataset.ids
+        
+        # Generamos los Morgan Fingerprints para esos SMILES exactos
+        X_morgan = featurizer.featurize(smiles_list)
+        
+        # Extraemos las etiquetas y (pChEMBL) que ya estaban en el dataset
+        y = dc_dataset.y.ravel()
+        
+        return X_morgan, y
+
+    train_ds = dc.data.DiskDataset('data/data_split_train')
+    valid_ds = dc.data.DiskDataset('data/data_split_valid')
+    test_ds = dc.data.DiskDataset('data/data_split_test')
+
     
     # Convertir a formato compatible con XGBoost
-    X_train, y_train = train_ds.X, train_ds.y.ravel()
-    X_valid, y_valid = valid_ds.X, valid_ds.y.ravel()
-    X_test, y_test = test_ds.X, test_ds.y.ravel()
+    X_train, y_train = transform_to_morgan(train_ds)
+    X_valid, y_valid = transform_to_morgan(valid_ds)
+    X_test, y_test = transform_to_morgan(test_ds)
     
     # Ejecutar optimización
     # Esto crea un archivo 'lrrk2_study.db' en vuestra carpeta actual
     study = optuna.create_study(
         study_name="lrrk2_optimization", 
-        storage="sqlite:///studies/lrrk2_study.db", 
+        storage="sqlite:///studies/lrrk2_study_XGB.db", 
         load_if_exists=True,
         direction="maximize"
     )
