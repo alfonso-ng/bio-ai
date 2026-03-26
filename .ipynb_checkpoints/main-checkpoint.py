@@ -1,139 +1,56 @@
-import deepchem as dc
-import pandas as pd
-import optuna
-import xgboost as xgb
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-import numpy as np
-import joblib
+import argparse
+import sys
+from src.pipeline import run_training, run_evaluation, make_prediction
 
-
-
-def run_pipeline():
-    def objective(trial):
-        # Definimos el espacio de búsqueda
-        param = {
-            'n_estimators': trial.suggest_int('n_estimators', 500, 2000),
-            'max_depth': trial.suggest_int('max_depth', 3, 10),
-            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
-            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 0.8),
-            'gamma': trial.suggest_float('gamma', 1e-8, 1.0, log=True),
-            'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 1.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 1.0, log=True),
-            'n_jobs': -1,
-            'random_state': 42
-        }
-    
-        # Entrenar modelo
-        model = xgb.XGBRegressor(**param)
-        model.fit(X_train, y_train)
-    
-        # Predecir en el set de VALIDACIÓN (scaffolds nunca vistos)
-        preds = model.predict(X_valid)
-        r2 = r2_score(y_valid, preds)
-        
-        return r2 # Optuna intentará maximizar este valor
-
-        
-    # 1. Cargar datos
-    df = pd.read_csv("data/CHEMBL1075104_nonredundant.csv")
-    
-    # 2. Featurización (Usando Morgan Fingerprints 2048)
-    featurizer = dc.feat.CircularFingerprint(size=2048, radius=2)
-
-    def transform_to_morgan(dc_dataset):
-        # Extraemos los SMILES que están guardados en el atributo .ids
-        smiles_list = dc_dataset.ids
-        
-        # Generamos los Morgan Fingerprints para esos SMILES exactos
-        X_morgan = featurizer.featurize(smiles_list)
-        
-        # Extraemos las etiquetas y (pChEMBL) que ya estaban en el dataset
-        y = dc_dataset.y.ravel()
-        
-        return X_morgan, y
-
-    train_ds = dc.data.DiskDataset('data/data_split_train')
-    valid_ds = dc.data.DiskDataset('data/data_split_valid')
-    test_ds = dc.data.DiskDataset('data/data_split_test')
-
-    
-    # Convertir a formato compatible con XGBoost
-    X_train, y_train = transform_to_morgan(train_ds)
-    X_valid, y_valid = transform_to_morgan(valid_ds)
-    X_test, y_test = transform_to_morgan(test_ds)
-    
-    # Ejecutar optimización
-    # Esto crea un archivo 'lrrk2_study.db' en vuestra carpeta actual
-    study = optuna.create_study(
-        study_name="lrrk2_optimization", 
-        storage="sqlite:///studies/lrrk2_study_XGB.db", 
-        load_if_exists=True,
-        direction="maximize"
+def main():
+    # 1. Creamos el manejador principal de argumentos
+    parser = argparse.ArgumentParser(
+        description="Ligand Based Drug Discovery Platform"
     )
-    study.optimize(objective, n_trials=1)
     
-    # 1. Crear una copia de los valores reales pero desordenados al azar
-    y_train_random = np.random.permutation(y_train)
-    
-    # 2. Re-entrenar el modelo (con vuestros mejores parámetros de Optuna)
-    # Usad los mismos parámetros que os dieron el 0.65
-    model_random = xgb.XGBRegressor(**study.best_params)
-    model_random.fit(X_train, y_train_random)
-    
-    # 3. Evaluar sobre el set de test REAL (el que no está desordenado)
-    preds_random = model_random.predict(X_test)
-    r2_rand = r2_score(y_test, preds_random)
-    
-    print(f"R2 con etiquetas aleatorias: {r2_rand:.4f}")
-    
-    if r2_rand <= 0:
-        print("✅ ¡PRUEBA SUPERADA! El modelo original es legítimo.")
+    # 2. Definimos los "sub-comandos" (acciones que el software puede hacer)
+    subparsers = parser.add_subparsers(dest="command", help="Comandos disponibles")
+
+    # --- COMANDO: TRAIN ---
+    # Ejemplo: python main.py train --protein CHEMBL4210421.csv --model gat
+    train_parser = subparsers.add_parser("train", help="Train new model")
+    train_parser.add_argument("--protein", type=str, required=True, help="CHEMBL file route")
+    train_parser.add_argument("--model", choices=["gat", "xgb", "ensemble"], default="xgb", help="Model architecture type")
+    train_parser.add_argument("--trials", type=int, help="Number of Optuna trials")
+
+    # --- COMANDO: EVALUATE ---
+    # Ejemplo: python main.py evaluate --protein CHEMBL4210421.csv --model gat
+    eval_parser = subparsers.add_parser("evaluate", help="Evaluate existing models and generate graphs")
+    eval_parser.add_argument("--protein", type=str, required=True)
+    eval_parser.add_argument("--model", choices=["gat", "xgb", "ensemble"], default="ensemble")
+
+    # --- COMANDO: PREDICT ---
+    # Ejemplo: python main.py predict --protein LRRK2 --smiles input.csv
+    predict_parser = subparsers.add_parser("predict", help="Predict activities for a list of SMILES")
+    predict_parser.add_argument("--protein", type=str, required=True)
+    predict_parser.add_argument("--model", choices=["gat", "xgb", "ensemble"], default="xgb", help="Model architecture type")
+    predict_parser.add_argument("--smiles", type=str, required=True, help="Input SMILES file route")
+
+    # 3. Parsear los argumentos de la terminal
+    args = parser.parse_args()
+
+    # 4. Lógica de enrutamiento: ¿Qué función de 'src/pipeline.py' llamamos?
+    if args.command == "train":
+        print(f"[*] Initiating training phase for {args.protein} using {args.model}...")
+        run_training(args.protein, args.model, args.trials)
+        
+    elif args.command == "evaluate":
+        print(f"[*] Evaluation results of model {args.model} for {args.protein}...")
+        run_evaluation(args.protein, args.model)
+        
+    elif args.command == "predict":
+        # Esta función nos devolverá el valor de pChEMBL predicho
+        prediction = make_prediction(args.protein, args.model, args.smiles)
+        # print(f"\n[RESULT] Predicted affinity for {args.protein}: {prediction:.3f} pChEMBL")
         
     else:
-        print("⚠️ OJO: El modelo sigue prediciendo algo con datos al azar. Revisad el leakage.")
-    
-    
-    # 1. Reentrenar con los mejores parámetros
-    best_model = xgb.XGBRegressor(**study.best_params)
-    best_model.fit(X_train, y_train)
-    
-    # 2. Guardar el modelo en el disco
-    joblib.dump(best_model, "models/mejor_modelo_lrrk2_scaffold.pkl")
-    print("Modelo guardado con éxito.")
-    
-    # 1. Métricas en el set de entrenamiento (qué tan bien se aprendió los datos)
-    train_r2 = best_model.score(X_train, y_train)
-    
-    # 2. Métricas en el set de validación (el promedio que dio Optuna)
-    val_r2 = study.best_value
-    
-    # 3. Métricas en el set de TEST (el mundo real)
-    test_pred = best_model.predict(X_test)
-    test_r2 = r2_score(y_test, test_pred)
-    test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
-    
-    # 4. Cálculo de la "Brecha de Generalización"
-    gap = val_r2 - test_r2
-    
-    print("\n" + "="*30)
-    print("   INFORME DE CALIDAD FINAL")
-    print("="*30)
-    print(f"R² Entrenamiento: {train_r2:.3f}")
-    print(f"R² Validación (Optuna): {val_r2:.3f}")
-    print(f"R² Test (Final): {test_r2:.3f}")
-    print(f"RMSE Test: {test_rmse:.3f}")
-    print("-"*30)
-    
-    if gap > 0.15:
-        print("ALERTA: Overfitting detectado. El modelo rinde mucho mejor en validación que en test.")
-    elif gap < 0:
-        print("El modelo rinde mejor en test.")
-    else:
-        print("ROBUSTEZ: El modelo generaliza bien. La brecha es aceptable.")
-
+        # Si el usuario no escribe ningún comando, mostramos la ayuda
+        parser.print_help()
 
 if __name__ == "__main__":
-    run_pipeline()
-
-
+    main()
